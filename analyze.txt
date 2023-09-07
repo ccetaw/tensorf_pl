@@ -1,0 +1,144 @@
+{
+    "config": "./configs/lego.txt",
+    "expname": "tensorf_vm_lego",
+    "basedir": "/cluster/scratch/jingyuwang/exps/tensorf",
+    "add_timestamp": 0,
+    "datadir": "/cluster/scratch/jingyuwang/data/nerf_synthetic/lego",
+    "progress_refresh_rate": 10,
+    "with_depth": false,
+    "downsample_train": 1.0,
+    "downsample_test": 1.0,
+    "model_name": "TensorVMSplit",
+    "batch_size": 4096,
+    "n_iters": 30000,
+    "dataset_name": "blender",
+    "lr_init": 0.02,
+    "lr_basis": 0.001,
+    "lr_decay_iters": -1,
+    "lr_decay_target_ratio": 0.1,
+    "lr_upsample_reset": 1,
+    "L1_weight_inital": 8e-05,
+    "L1_weight_rest": 4e-05,
+    "Ortho_weight": 0.0,
+    "TV_weight_density": 0.0,
+    "TV_weight_app": 0.0,
+    "n_lamb_sigma": [
+        16,
+        16,
+        16
+    ],
+    "n_lamb_sh": [
+        48,
+        48,
+        48
+    ],
+    "data_dim_color": 27,
+    "rm_weight_mask_thre": 0.0001,
+    "alpha_mask_thre": 0.0001,
+    "distance_scale": 25,
+    "density_shift": -10,
+    "shadingMode": "MLP_Fea",
+    "pos_pe": 6,
+    "view_pe": 2,
+    "fea_pe": 2,
+    "featureC": 128,
+    "ckpt": null,
+    "render_only": 0,
+    "render_test": 1,
+    "render_train": 0,
+    "render_path": 0,
+    "export_mesh": 0,
+    "lindisp": false,
+    "perturb": 1.0,
+    "accumulate_decay": 0.998,
+    "fea2denseAct": "softplus",
+    "ndc_ray": 0,
+    "nSamples": 1000000.0,
+    "step_ratio": 0.5,
+    "white_bkgd": false,
+    "N_voxel_init": 2097156,
+    "N_voxel_final": 27000000,
+    "upsamp_list": [
+        2000,
+        3000,
+        4000,
+        5500,
+        7000
+    ],
+    "update_AlphaMask_list": [
+        2000,
+        4000
+    ],
+    "idx_view": 0,
+    "N_vis": 5,
+    "vis_every": 10000
+}
+Loading data train (100): 100%|██████████████████████████| 100/100 [00:04<00:00, 22.54it/s]
+Loading data test (200): 100%|███████████████████████████| 200/200 [00:08<00:00, 22.61it/s]
+aabb tensor([-1.5000, -1.5000, -1.5000,  1.5000,  1.5000,  1.5000], device='cuda:0')
+grid size [128, 128, 128]
+sampling step size:  tensor(0.0118, device='cuda:0')
+sampling number:  440
+pos_pe 6 view_pe 2 fea_pe 2
+MLPRender_Fea(
+  (mlp): Sequential(
+    (0): Linear(in_features=150, out_features=128, bias=True)
+    (1): ReLU(inplace=True)
+    (2): Linear(in_features=128, out_features=128, bias=True)
+    (3): ReLU(inplace=True)
+    (4): Linear(in_features=128, out_features=3, bias=True)
+  )
+)
+========> filtering rays ...
+Ray filtering done! takes 1.827005386352539 s. ray mask ratio: 0.9975844621658325
+STAGE:2023-08-25 09:55:16 45931:45931 ActivityProfilerController.cpp:311] Completed Stage: Warm Up
+torch.Size([4096, 3])
+torch.Size([4096, 443, 3])
+STAGE:2023-08-25 09:55:19 45931:45931 ActivityProfilerController.cpp:317] Completed Stage: Collection
+STAGE:2023-08-25 09:55:19 45931:45931 ActivityProfilerController.cpp:321] Completed Stage: Post Processing
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------------------------------------------------
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls                                            Input Shapes
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------------------------------------------------
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     730.000us        18.05%     730.000us     146.000us             5                                                      []
+                                              aten::mul         0.00%      80.000us         0.02%     687.000us     229.000us     679.000us        16.79%     679.000us     226.333us             3                            [[16, 995494], [16, 995494]]
+void cudnn::bilinear_sampler_fw_4d<float, float>(cud...         0.00%       0.000us         0.00%       0.000us       0.000us     610.000us        15.08%     610.000us     101.667us             6                                                      []
+                       Memcpy HtoD (Pageable -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us     447.000us        11.05%     447.000us      37.250us            12                                                      []
+                                               aten::to         0.00%       2.000us         0.02%     566.000us     566.000us       0.000us         0.00%     438.000us     438.000us             1               [[4096, 443], [], [], [], [], [], [], []]
+                                         aten::_to_copy         0.00%       5.000us         0.02%     564.000us     564.000us       0.000us         0.00%     438.000us     438.000us             1                   [[4096, 443], [], [], [], [], [], []]
+                                            aten::copy_         0.00%       8.000us         0.02%     546.000us     546.000us     438.000us        10.83%     438.000us     438.000us             1                          [[4096, 443], [4096, 443], []]
+                                     aten::grid_sampler         0.00%      25.000us        51.25%        1.856s     618.610ms       0.000us         0.00%     340.000us     113.333us             3      [[1, 16, 128, 128], [1, 995494, 1, 2], [], [], []]
+                               aten::cudnn_grid_sampler        50.42%        1.826s        51.25%        1.856s     618.602ms     340.000us         8.41%     340.000us     113.333us             3                  [[1, 16, 128, 128], [1, 995494, 1, 2]]
+                                       cudaLaunchKernel         0.05%       1.660ms         0.05%       1.660ms       7.650us     274.000us         6.78%     274.000us       1.263us           217                                                      []
+                                     aten::grid_sampler         0.00%      18.000us         0.02%     827.000us     275.667us       0.000us         0.00%     273.000us      91.000us             3        [[1, 16, 128, 1], [1, 995494, 1, 2], [], [], []]
+                               aten::cudnn_grid_sampler         0.00%      92.000us         0.02%     809.000us     269.667us     273.000us         6.75%     273.000us      91.000us             3                    [[1, 16, 128, 1], [1, 995494, 1, 2]]
+void at::native::index_elementwise_kernel<128, 4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     272.000us         6.73%     272.000us      27.200us            10                                                      []
+                                              aten::sum         0.00%      87.000us         0.00%     113.000us      37.667us     254.000us         6.28%     254.000us      84.667us             3                              [[16, 995494], [], [], []]
+void at::native::reduce_kernel<256, 2, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us     254.000us         6.28%     254.000us      84.667us             3                                                      []
+                                              aten::cat         0.03%       1.073ms         0.05%       1.683ms     240.429us     237.000us         5.86%     239.000us      34.143us             7                                                [[], []]
+void at::native::elementwise_kernel<128, 2, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us     227.000us         5.61%     227.000us      11.947us            19                                                      []
+                                          aten::nonzero         0.00%     138.000us         0.01%     339.000us     169.500us     125.000us         3.09%     223.000us     111.500us             2                                           [[4096, 443]]
+                                            aten::index         0.00%      50.000us         0.01%     300.000us     300.000us      54.000us         1.34%     215.000us     215.000us             1                                    [[4096, 443, 3], []]
+void at::native::elementwise_kernel<128, 2, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us     205.000us         5.07%     205.000us      34.167us             6                                                      []
+                                            aten::stack         0.00%      35.000us         0.02%     651.000us     217.000us       0.000us         0.00%     192.000us      64.000us             3                                                [[], []]
+                                              aten::sub         0.00%      32.000us         0.01%     294.000us     294.000us      55.000us         1.36%     146.000us     146.000us             1                               [[4096, 443, 3], [3], []]
+                                            aten::index         0.00%     156.000us         0.01%     251.000us      41.833us     136.000us         3.36%     138.000us      23.000us             6                                 [[3, 995494, 1, 2], []]
+                                              aten::mul         0.00%      29.000us         0.01%     265.000us     265.000us      55.000us         1.36%     132.000us     132.000us             1                                   [[4096, 443, 3], [3]]
+void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us     126.000us         3.12%     126.000us       8.400us            15                                                      []
+void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us     105.000us         2.60%     105.000us      35.000us             3                                                      []
+                                       aten::index_put_         0.00%      33.000us         0.01%     210.000us     210.000us       0.000us         0.00%      95.000us      95.000us             1                         [[4096, 443], [], [995494], []]
+                                 aten::_index_put_impl_         0.00%      31.000us         0.00%     177.000us     177.000us      33.000us         0.82%      95.000us      95.000us             1                     [[4096, 443], [], [995494], [], []]
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      90.000us         2.23%      90.000us      11.250us             8                                                      []
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      83.000us         2.05%      83.000us       3.458us            24                                                      []
+                                            aten::index         0.00%      75.000us         0.00%     126.000us      42.000us      82.000us         2.03%      82.000us      27.333us             3                                       [[995494, 3], []]
+void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us      82.000us         2.03%      82.000us      82.000us             1                                                      []
+                                              aten::add         0.00%      19.000us         0.01%     183.000us     183.000us      54.000us         1.34%      81.000us      81.000us             1                      [[4096, 1, 3], [4096, 443, 3], []]
+                                              aten::mul         0.00%      34.000us         0.00%      53.000us      17.667us      78.000us         1.93%      78.000us      26.000us             3                              [[4096, 443], [4096, 443]]
+                                              aten::add         0.00%      22.000us         0.00%      29.000us      29.000us      20.000us         0.49%      75.000us      75.000us             1                            [[4096, 1], [4096, 443], []]
+void at::native::elementwise_kernel<128, 4, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us      72.000us         1.78%      72.000us      36.000us             2                                                      []
+void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us      67.000us         1.66%      67.000us      22.333us             3                                                      []
+void at::native::(anonymous namespace)::write_indice...         0.00%       0.000us         0.00%       0.000us       0.000us      62.000us         1.53%      62.000us      31.000us             2                                                      []
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      60.000us         1.48%      60.000us      10.000us             6                                                      []
+                                  cudaStreamSynchronize         0.02%     632.000us         0.02%     632.000us      39.500us      59.000us         1.46%      59.000us       3.688us            16                                                      []
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------------------------------------------------
+Self CPU time total: 3.621s
+Self CUDA time total: 4.044ms

@@ -2,8 +2,28 @@ import cv2,torch
 import numpy as np
 from PIL import Image
 import torchvision.transforms as T
-import torch.nn.functional as F
 import scipy.signal
+
+
+class SimpleSampler:
+    """
+    Sampler for batching and shuffling. Replacement of DataLoader, as it's extremely slow 
+    when dataset is big and shuffle=True. 
+    """
+    def __init__(self, total, batch):
+        self.total = total
+        self.batch = batch
+        self.curr = total
+        self.ids = [] 
+
+    def nextids(self):
+        self.curr+=self.batch
+        if self.curr + self.batch > self.total:
+            self.ids = torch.LongTensor(np.random.permutation(self.total))
+            self.curr = 0
+        return self.ids[self.curr:self.curr+self.batch]
+
+
 
 mse2psnr = lambda x : -10. * torch.log(x) / torch.log(torch.Tensor([10.]))
 

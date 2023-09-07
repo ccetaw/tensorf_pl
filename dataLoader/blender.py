@@ -1,5 +1,5 @@
 import torch,cv2
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 import json
 from tqdm import tqdm
 import os
@@ -7,7 +7,7 @@ from PIL import Image
 from torchvision import transforms as T
 
 
-from .ray_utils import *
+from dataLoader.ray_utils import *
 
 
 class BlenderDataset(Dataset):
@@ -125,3 +125,14 @@ class BlenderDataset(Dataset):
                       'rgbs': img,
                       'mask': mask}
         return sample
+
+
+if __name__ == "__main__":
+    datadir = "/cluster/scratch/jingyuwang/data/nerf_synthetic/lego/"
+    training_data = BlenderDataset(datadir)
+    train_dataloader = DataLoader(training_data, batch_size=4096, shuffle=True)
+    while(True):
+        train_features, train_labels = next(iter(train_dataloader))
+        print(f"Feature batch shape: {train_features.size()}")
+        print(f"Labels batch shape: {train_labels.size()}")
+    

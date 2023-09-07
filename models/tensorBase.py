@@ -15,6 +15,9 @@ def positional_encoding(positions, freqs):
         return pts
 
 def raw2alpha(sigma, dist):
+    """
+    Turn density into transmittance.
+    """
     # sigma, dist  [N_rays, N_samples]
     alpha = 1. - torch.exp(-sigma*dist)
 
@@ -37,6 +40,9 @@ def RGBRender(xyz_sampled, viewdirs, features):
     return rgb
 
 class AlphaGridMask(torch.nn.Module):
+    """
+    Grid mask indicating the occupancy of the space. 
+    """
     def __init__(self, device, aabb, alpha_volume):
         super(AlphaGridMask, self).__init__()
         self.device = device
@@ -44,7 +50,7 @@ class AlphaGridMask(torch.nn.Module):
         self.aabb=aabb.to(self.device)
         self.aabbSize = self.aabb[1] - self.aabb[0]
         self.invgridSize = 1.0/self.aabbSize * 2
-        self.alpha_volume = alpha_volume.view(1,1,*alpha_volume.shape[-3:])
+        self.alpha_volume = alpha_volume.view(1,1,*alpha_volume.shape[-3:]) # Additional dimension for grid_sample
         self.gridSize = torch.LongTensor([alpha_volume.shape[-1],alpha_volume.shape[-2],alpha_volume.shape[-3]]).to(self.device)
 
     def sample_alpha(self, xyz_sampled):
@@ -143,14 +149,14 @@ class TensorBase(torch.nn.Module):
                     fea2denseAct = 'softplus'):
         super(TensorBase, self).__init__()
 
-        self.density_n_comp = density_n_comp
-        self.app_n_comp = appearance_n_comp
-        self.app_dim = app_dim
+        self.density_n_comp = density_n_comp # num of components for density tensor 3 x 1, i.e. R
+        self.app_n_comp = appearance_n_comp # num of components for appearance tensor 3 x 1,  i.e. R 
+        self.app_dim = app_dim # appearance feature dimension
         self.aabb = aabb
         self.alphaMask = alphaMask
         self.device=device
 
-        self.density_shift = density_shift
+        self.density_shift = density_shift # density offset 
         self.alphaMask_thres = alphaMask_thres
         self.distance_scale = distance_scale
         self.rayMarch_weight_thres = rayMarch_weight_thres
@@ -219,6 +225,9 @@ class TensorBase(torch.nn.Module):
         pass
     
     def normalize_coord(self, xyz_sampled):
+        """
+        Normalized to [-1, 1]
+        """
         return (xyz_sampled-self.aabb[0]) * self.invaabbSize - 1
 
     def get_optparam_groups(self, lr_init_spatial = 0.02, lr_init_network = 0.001):
@@ -282,7 +291,7 @@ class TensorBase(torch.nn.Module):
 
     def sample_ray(self, rays_o, rays_d, is_train=True, N_samples=-1):
         """
-        Sample points on rays. Filter out points outside the bounding box.
+        Sample points on rays. Filter out points outside the bounding box by providing a mask.
         """
         N_samples = N_samples if N_samples>0 else self.nSamples
         stepsize = self.stepSize # Same stepsize for every ray
@@ -299,7 +308,11 @@ class TensorBase(torch.nn.Module):
         step = stepsize * rng.to(rays_o.device)
         interpx = (t_min[...,None] + step)
 
-        rays_pts = rays_o[...,None,:] + rays_d[...,None,:] * interpx[...,None] # [batch_size, 1, 3]
+        print(rays_o.shape)
+        
+        rays_pts = rays_o[...,None,:] + rays_d[...,None,:] * interpx[...,None] # [batch_size, N_samples, 3]
+
+        print(rays_pts.shape)
         mask_outbbox = ((self.aabb[0]>rays_pts) | (rays_pts>self.aabb[1])).any(dim=-1)
 
         return rays_pts, interpx, ~mask_outbbox # Return all points and filter
@@ -311,7 +324,7 @@ class TensorBase(torch.nn.Module):
     @torch.no_grad()
     def getDenseAlpha(self,gridSize=None):
         """
-        Get grid points and alpha value (transmittance) at each point.
+        Sample grid points and alpha value (transmittance) at each point.
         
         Return
         ------
@@ -327,9 +340,7 @@ class TensorBase(torch.nn.Module):
         ), -1).to(self.device)
         dense_xyz = self.aabb[0] * (1-samples) + self.aabb[1] * samples # [gridSize[0], gridSize[1], gridSize[2], 3], gives the coordinates of grid points
 
-        # dense_xyz = dense_xyz
-        # print(self.stepSize, self.distance_scale*self.aabbDiag)
-        alpha = torch.zeros_like(dense_xyz[...,0])
+        alpha = torch.zeros_like(dense_xyz[...,0]) # [gridSize[0], gridSize[1], gridSize[2]]
         for i in range(gridSize[0]):
             alpha[i] = self.compute_alpha(dense_xyz[i].view(-1,3), self.stepSize).view((gridSize[1], gridSize[2]))
         return alpha, dense_xyz
@@ -337,7 +348,7 @@ class TensorBase(torch.nn.Module):
     @torch.no_grad()
     def updateAlphaMask(self, gridSize=(200,200,200)):
         """
-        Update the alpha mask and get the new bounding box. 
+        Update the alpha mask and get the new bounding box. Grid size changes dynamically during training.
         """
 
         alpha, dense_xyz = self.getDenseAlpha(gridSize)
@@ -407,7 +418,16 @@ class TensorBase(torch.nn.Module):
 
 
     def compute_alpha(self, xyz_locs, length=1):
+        """
+        Compute transmittance values at given locations, using assumed interval. 
+        ---------- 
+        Input:
+        xyz_locs: Tensor, shape=[n_points, 3]. Coordinates of points.
+        length: float. assumed interval
 
+        Return:
+        alpha: Tensor, shape=[n_points, ]. 0 for invalid points
+        """
         if self.alphaMask is not None:
             alphas = self.alphaMask.sample_alpha(xyz_locs)
             alpha_mask = alphas > 0
@@ -415,7 +435,7 @@ class TensorBase(torch.nn.Module):
             alpha_mask = torch.ones_like(xyz_locs[:,0], dtype=bool)
             
 
-        sigma = torch.zeros(xyz_locs.shape[:-1], device=xyz_locs.device)
+        sigma = torch.zeros(xyz_locs.shape[:-1], device=xyz_locs.device) 
 
         if alpha_mask.any():
             xyz_sampled = self.normalize_coord(xyz_locs[alpha_mask])
@@ -424,7 +444,7 @@ class TensorBase(torch.nn.Module):
             sigma[alpha_mask] = validsigma
         
 
-        alpha = 1 - torch.exp(-sigma*length).view(xyz_locs.shape[:-1])
+        alpha = 1 - torch.exp(-sigma*length) #.view(xyz_locs.shape[:-1])
 
         return alpha
 
@@ -445,17 +465,22 @@ class TensorBase(torch.nn.Module):
             dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
         viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled.shape)
         
+        print("xyz_sampled ",xyz_sampled.shape)
+        
         if self.alphaMask is not None:
             # Filter out points with invalid alpha values
             alphas = self.alphaMask.sample_alpha(xyz_sampled[ray_valid])
             alpha_mask = alphas > 0
             ray_invalid = ~ray_valid
-            ray_invalid[ray_valid] |= (~alpha_mask)
+            ray_invalid[ray_valid] |= (~alpha_mask) 
             ray_valid = ~ray_invalid
 
 
         sigma = torch.zeros(xyz_sampled.shape[:-1], device=xyz_sampled.device)
         rgb = torch.zeros((*xyz_sampled.shape[:2], 3), device=xyz_sampled.device)
+        print("sigma ", sigma.shape)
+        print("rgb ", rgb.shape)
+
 
         if ray_valid.any():
             xyz_sampled = self.normalize_coord(xyz_sampled)

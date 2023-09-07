@@ -1,18 +1,14 @@
 
 import os
+import datetime
+import sys
+from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
+
 from opt import config_parser
-
-
-
-import json, random
 from renderer import *
 from utils import *
-from torch.utils.tensorboard import SummaryWriter
-import datetime
-
 from dataLoader import dataset_dict
-import sys
 
 
 
@@ -21,19 +17,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 renderer = OctreeRender_trilinear_fast
 
 
-class SimpleSampler:
-    def __init__(self, total, batch):
-        self.total = total
-        self.batch = batch
-        self.curr = total
-        self.ids = [] 
-
-    def nextids(self):
-        self.curr+=self.batch
-        if self.curr + self.batch > self.total:
-            self.ids = torch.LongTensor(np.random.permutation(self.total))
-            self.curr = 0
-        return self.ids[self.curr:self.curr+self.batch]
 
 
 @torch.no_grad()
@@ -101,30 +84,25 @@ def reconstruction(args):
     update_AlphaMask_list = args.update_AlphaMask_list
     n_lamb_sigma = args.n_lamb_sigma
     n_lamb_sh = args.n_lamb_sh
+    N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(args.N_voxel_init), np.log(args.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:] #linear in logrithmic space
 
-    
+    # init log file
     if args.add_timestamp:
         logfolder = f'{args.basedir}/{args.expname}{datetime.datetime.now().strftime("-%Y%m%d-%H%M%S")}'
     else:
         logfolder = f'{args.basedir}/{args.expname}'
-    
-
-    # init log file
     os.makedirs(logfolder, exist_ok=True)
     os.makedirs(f'{logfolder}/imgs_vis', exist_ok=True)
     os.makedirs(f'{logfolder}/imgs_rgba', exist_ok=True)
     os.makedirs(f'{logfolder}/rgba', exist_ok=True)
     summary_writer = SummaryWriter(logfolder)
 
-
-
     # init parameters
-    # tensorVM, renderer = init_parameters(args, train_dataset.scene_bbox.to(device), reso_list[0])
     aabb = train_dataset.scene_bbox.to(device)
     reso_cur = N_to_reso(args.N_voxel_init, aabb)
     nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio))
 
-
+    # Load/init model
     if args.ckpt is not None:
         ckpt = torch.load(args.ckpt, map_location=device)
         kwargs = ckpt['kwargs']
@@ -137,7 +115,6 @@ def reconstruction(args):
                     shadingMode=args.shadingMode, alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift, distance_scale=args.distance_scale,
                     pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio, fea2denseAct=args.fea2denseAct)
 
-
     grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis)
     if args.lr_decay_iters > 0:
         lr_factor = args.lr_decay_target_ratio**(1/args.lr_decay_iters)
@@ -149,29 +126,27 @@ def reconstruction(args):
     
     optimizer = torch.optim.Adam(grad_vars, betas=(0.9,0.99))
 
-
-    #linear in logrithmic space
-    N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(args.N_voxel_init), np.log(args.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
-
-
     torch.cuda.empty_cache()
     PSNRs,PSNRs_test = [],[0]
 
+
+    # Init loss weight
+    Ortho_reg_weight = args.Ortho_weight
+    L1_reg_weight = args.L1_weight_inital
+    TV_weight_density, TV_weight_app = args.TV_weight_density, args.TV_weight_app
+    tvreg = TVLoss() # Total variation loss function
+    print("initial L1_reg_weight", L1_reg_weight)
+    print("initial Ortho_reg_weight", Ortho_reg_weight)
+    print(f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}")
+
+
+    # Data batching and shuffling
     allrays, allrgbs = train_dataset.all_rays, train_dataset.all_rgbs
     if not args.ndc_ray:
         allrays, allrgbs = tensorf.filtering_rays(allrays, allrgbs, bbox_only=True)
     trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
 
-    Ortho_reg_weight = args.Ortho_weight
-    print("initial Ortho_reg_weight", Ortho_reg_weight)
-
-    L1_reg_weight = args.L1_weight_inital
-    print("initial L1_reg_weight", L1_reg_weight)
-    TV_weight_density, TV_weight_app = args.TV_weight_density, args.TV_weight_app
-    tvreg = TVLoss()
-    print(f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}")
-
-
+    # Start training
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     for iteration in pbar:
 
@@ -179,7 +154,6 @@ def reconstruction(args):
         ray_idx = trainingSampler.nextids()
         rays_train, rgb_train = allrays[ray_idx], allrgbs[ray_idx].to(device)
 
-        #rgb_map, alphas_map, depth_map, weights, uncertainty
         rgb_map, alphas_map, depth_map, weights, uncertainty = renderer(rays_train, tensorf, chunk=args.batch_size,
                                 N_samples=nSamples, white_bg=white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
 
@@ -233,13 +207,14 @@ def reconstruction(args):
             PSNRs = []
 
 
-        if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
+        # Visualize a few test images every `vis_every` iterations
+        if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0: 
             PSNRs_test = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
                                     prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, compute_extra_metrics=False)
             summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
 
 
-
+        # Update the occupancy grid 
         if iteration in update_AlphaMask_list:
 
             if reso_cur[0] * reso_cur[1] * reso_cur[2]<256**3:# update volume resolution
@@ -302,8 +277,8 @@ def reconstruction(args):
 if __name__ == '__main__':
 
     torch.set_default_dtype(torch.float32)
-    torch.manual_seed(20211202)
-    np.random.seed(20211202)
+    torch.manual_seed(20221030)
+    np.random.seed(20221030)
 
     args = config_parser()
     print(args)
