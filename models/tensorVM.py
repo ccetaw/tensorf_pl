@@ -2,9 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from logger import logger
+
 class TensorVMBase(nn.Module):
     """
-    Class TensorBase. Parent class for Tensor3D and Tensor4D
+    Class TensorBase. Parent class for Tensor3D and Tensor4D.
     """
     
     def __init__(self, 
@@ -13,14 +15,13 @@ class TensorVMBase(nn.Module):
                  n_comp,         # List of int. Number of decomposition components for each dimension.
                  value_offset,   # float or vector. Offset to be added.
                  device,         # str. 'cuda' or 'cpu'.
-                 logger     # Logger. Customized Logger class. 
                  ) -> None:
         super().__init__()
         self.update_aabb(aabb, grid_size)
         self.n_comp = n_comp
         self.value_offset = value_offset
         self.device = device
-        self.logger = logger
+        logger = logger
 
         self.mat_mode = [[0,1], [0,2], [1,2]]
         self.vec_mode =  [2, 1, 0]
@@ -84,10 +85,10 @@ class TensorVMBase(nn.Module):
         b_r = torch.stack([b_r, self.grid_size]).amin(0)
 
         # ---- DEBUG ---- #
-        self.logger.debug_print(xyz_min)
-        self.logger.debug_print(xyz_max)
-        self.logger.debug_print(t_l)
-        self.logger.debug_print(b_r)
+        logger.debug_print(xyz_min)
+        logger.debug_print(xyz_max)
+        logger.debug_print(t_l)
+        logger.debug_print(b_r)
         # ---- DEBUG ---- #
 
         for i in range(len(self.vec_mode)):
@@ -105,8 +106,8 @@ class TensorVMBase(nn.Module):
         correct_aabb[1] = (1-b_r_r)*self.aabb[0] + b_r_r*self.aabb[1]
 
         # ---- DEBUG ---- #
-        self.logger.debug_print(new_aabb)
-        self.logger.debug_print(correct_aabb)
+        logger.debug_print(new_aabb)
+        logger.debug_print(correct_aabb)
         # ---- DEBUG ---- #
 
         new_aabb = correct_aabb
@@ -131,8 +132,8 @@ class TensorVMBase(nn.Module):
                 F.interpolate(self.lines[i].data, size=(res_target[vec_id], 1), mode='bilinear', align_corners=True))
 
         # ---- DEBUG ---- #
-        self.logger.debug_print(self.planes[0].shape)
-        self.logger.debug_print(self.lines[0].shape)
+        logger.debug_print(self.planes[0].shape)
+        logger.debug_print(self.lines[0].shape)
         # ---- DEBUG ---- #
 
         self.update_aabb(self.aabb, res_target)
@@ -141,8 +142,8 @@ class TensorVMBase(nn.Module):
  
 class TensorVM3D(TensorVMBase):
 
-    def __init__(self, aabb, grid_size, n_comp, value_offset, device, activation, logger) -> None:
-        super().__init__(aabb, grid_size, n_comp, value_offset, device, logger)
+    def __init__(self, aabb, grid_size, n_comp, value_offset, device, activation) -> None:
+        super().__init__(aabb, grid_size, n_comp, value_offset, device)
         self.activation = activation
 
     def get_kwargs(self):
@@ -153,7 +154,6 @@ class TensorVM3D(TensorVMBase):
             'aabb': self.aabb,
             'grid_size': self.grid_size.tolist(),
             'n_comp': self.density_n_comp,
-            'dim': self.app_dim,
             'value_offset': self.value_offset,
             'activation': self.activation
         }
@@ -174,8 +174,8 @@ class TensorVM3D(TensorVMBase):
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
 
         # ---- DEBUG ---- #
-        self.logger.debug_print(coordinate_plane.shape)
-        self.logger.debug_print(coordinate_line.shape)
+        logger.debug_print(coordinate_plane.shape)
+        logger.debug_print(coordinate_line.shape)
         # ---- DEBUG ---- #
 
         feature = torch.zeros((xyz_locs.shape[0],), device=xyz_locs.device)
@@ -193,9 +193,9 @@ class TensorVM3D(TensorVMBase):
             feature = feature + torch.sum(plane_coef_point * line_coef_point, dim=0)
 
         # ---- DEBUG ---- #
-            self.logger.debug_print(plane_coef_point.shape)
-            self.logger.debug_print(line_coef_point.shape)
-            self.logger.debug_print(feature.shape)
+            logger.debug_print(plane_coef_point.shape)
+            logger.debug_print(line_coef_point.shape)
+            logger.debug_print(feature.shape)
         # ---- DEBUG ---- #
 
         if self.activation is not None:
@@ -206,8 +206,8 @@ class TensorVM3D(TensorVMBase):
 
 class TensorVM4D(TensorVMBase):
     
-    def __init__(self, aabb, grid_size, n_comp, value_offset, device, activation, logger, dim_4d=1) -> None:
-        super().__init__(aabb, grid_size, n_comp, value_offset, device, logger)
+    def __init__(self, aabb, grid_size, n_comp, value_offset, device, activation, dim_4d=1) -> None:
+        super().__init__(aabb, grid_size, n_comp, value_offset, device)
         self.activation = activation
 
         self.dim_4d = dim_4d
@@ -221,7 +221,6 @@ class TensorVM4D(TensorVMBase):
             'aabb': self.aabb,
             'grid_size': self.grid_size.tolist(),
             'n_comp': self.density_n_comp,
-            'dim': self.app_dim,
             'value_offset': self.value_offset,
             'dim_4d': self.dim_4d,
             'activation': self.activation
@@ -233,6 +232,9 @@ class TensorVM4D(TensorVMBase):
         ----
         Input:
         - xyz_locs: Tensor [n_points, 3]. Spatial coordinates
+
+        Output:
+        - feature: Tensor [n_points, dim_4d].
         """
         # plane + line basis
         coordinate_plane = torch.stack((xyz_locs[..., self.mat_mode[0]], xyz_locs[..., self.mat_mode[1]], xyz_locs[..., self.mat_mode[2]])).detach().view(3, -1, 1, 2)
@@ -240,8 +242,8 @@ class TensorVM4D(TensorVMBase):
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
 
         # ---- DEBUG ---- #
-        self.logger.debug_print(coordinate_plane.shape)
-        self.logger.debug_print(coordinate_line.shape)
+        logger.debug_print(coordinate_plane.shape)
+        logger.debug_print(coordinate_line.shape)
         # ---- DEBUG ---- #
 
         plane_coef_point,line_coef_point = [],[]
@@ -256,9 +258,9 @@ class TensorVM4D(TensorVMBase):
         feature = self.basis_mat((plane_coef_point * line_coef_point).T) 
 
         # ---- DEBUG ---- #
-        self.logger.debug_print(plane_coef_point)
-        self.logger.debug_print(line_coef_point)
-        self.logger.debug_print(feature)
+        logger.debug_print(plane_coef_point)
+        logger.debug_print(line_coef_point)
+        logger.debug_print(feature)
         # ---- DEBUG ---- #
 
         if self.activation is not None:

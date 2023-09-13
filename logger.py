@@ -1,5 +1,4 @@
 import os
-import shutil
 import torch
 import imageio 
 import json
@@ -32,6 +31,9 @@ class Logger:
         
         # Create basedir
         os.makedirs(self.logdir, exist_ok=True)
+
+    def set_logdir(self, basedir):
+        self.logdir = basedir
 
     def set_mode(self, debug=True):
         """
@@ -99,6 +101,8 @@ class Logger:
         if self.debug:
             info = f"Write json file to {write_path}"
             self.debug_print(info)
+
+logger = Logger(logdir='.', debug=True)
 
 if __name__ == "__main__":
     import numpy as np
