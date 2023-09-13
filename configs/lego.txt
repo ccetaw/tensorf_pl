@@ -1,8 +1,8 @@
 
 dataset_name = blender
-datadir = /cluster/scratch/jingyuwang/data/nerf_synthetic/lego
-expname =  tensorf_vm_lego
-basedir = /cluster/scratch/jingyuwang/exps/tensorf
+datadir = /local/home/jingyuwang/repo/data/nerf_synthetic/lego
+expname =  tensorf_vm_lego_xxx
+basedir = /local/home/jingyuwang/repo/exp
 
 n_iters = 30000
 batch_size = 4096

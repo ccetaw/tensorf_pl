@@ -60,6 +60,12 @@ tensorf = eval(args.model_name)(aabb, reso_cur, device,
             shadingMode=args.shadingMode, alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift, distance_scale=args.distance_scale,
             pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio, fea2denseAct=args.fea2denseAct)
 
+print(tensorf)
+
+print("Model's state_dict:")
+for param_tensor in tensorf.state_dict():
+    print(param_tensor, "\t", tensorf.state_dict()[param_tensor].size())
+
 # Process data: filter rays 
 allrays, allrgbs = train_dataset.all_rays, train_dataset.all_rgbs
 if not args.ndc_ray:

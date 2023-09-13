@@ -78,6 +78,9 @@ def reconstruction(args):
     white_bg = train_dataset.white_bg
     near_far = train_dataset.near_far
     ndc_ray = args.ndc_ray
+    aabb = train_dataset.scene_bbox.to(device)
+    reso_cur = N_to_reso(args.N_voxel_init, aabb)
+    nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio))
 
     # init resolution
     upsamp_list = args.upsamp_list
@@ -97,10 +100,6 @@ def reconstruction(args):
     os.makedirs(f'{logfolder}/rgba', exist_ok=True)
     summary_writer = SummaryWriter(logfolder)
 
-    # init parameters
-    aabb = train_dataset.scene_bbox.to(device)
-    reso_cur = N_to_reso(args.N_voxel_init, aabb)
-    nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio))
 
     # Load/init model
     if args.ckpt is not None:

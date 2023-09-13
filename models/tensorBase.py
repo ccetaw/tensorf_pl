@@ -465,8 +465,6 @@ class TensorBase(torch.nn.Module):
             dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
         viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled.shape)
         
-        print("xyz_sampled ",xyz_sampled.shape)
-        
         if self.alphaMask is not None:
             # Filter out points with invalid alpha values
             alphas = self.alphaMask.sample_alpha(xyz_sampled[ray_valid])
@@ -478,8 +476,6 @@ class TensorBase(torch.nn.Module):
 
         sigma = torch.zeros(xyz_sampled.shape[:-1], device=xyz_sampled.device)
         rgb = torch.zeros((*xyz_sampled.shape[:2], 3), device=xyz_sampled.device)
-        print("sigma ", sigma.shape)
-        print("rgb ", rgb.shape)
 
 
         if ray_valid.any():
