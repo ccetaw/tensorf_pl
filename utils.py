@@ -24,7 +24,6 @@ class SimpleSampler:
         return self.ids[self.curr:self.curr+self.batch]
 
 
-
 mse2psnr = lambda x : -10. * torch.log(x) / torch.log(torch.Tensor([10.]))
 
 

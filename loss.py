@@ -1,6 +1,4 @@
 import torch
-import torch.nn as nn
-
 
 def vector_diffs(lines):
     """
@@ -9,7 +7,7 @@ def vector_diffs(lines):
     Input:
     - lines: List of vectors(1D Tensor). 
     """
-    total = 0
+    total = torch.tensor(0.0)
     
     for idx in range(len(lines)):
         n_comp, n_size = lines[idx].shape[1:-1]
@@ -20,7 +18,6 @@ def vector_diffs(lines):
     return total
 
 
-
 def L1_VM(planes, lines):
     """
     L1 regularization for VM decompositon. 
@@ -29,7 +26,7 @@ def L1_VM(planes, lines):
     - planes: List of matrices(2D Tensor). VM decomposition planes.
     - lines: List of vectors(1D Tensor). VM decomposition lines.
     """
-    total = 0
+    total = torch.tensor(0.0) 
     for idx in range(len(planes)):
         total = total + torch.mean(torch.abs(planes[idx])) + torch.mean(torch.abs(lines[idx]))# + torch.mean(torch.abs(self.app_plane[idx])) + torch.mean(torch.abs(self.planes[idx]))
     return total

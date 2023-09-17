@@ -8,18 +8,17 @@ from torch.utils.tensorboard.writer import SummaryWriter
 class Logger:
     """
     Class Logger. An integration of tensorboard writer and icecream debug print, as well as other ostream utilities. 
+    This class is to be declared globally. You must call set_logdir() method to set the log directory.
     """
 
-    def __init__(self, logdir, debug) -> None:
+    def __init__(self, debug) -> None:
         """
         Input:
-        - logdir: str. Directory to store the log.
         - debug: bool. 
         """
         # Init parameters
-        self.logdir = logdir
+        self.logdir = '.'
         self.debug = debug
-        self.summary_writer = SummaryWriter(self.logdir)
         
         # ic debug_print
         self.debug_print = ic
@@ -29,11 +28,19 @@ class Logger:
         else:
             self.debug_print.disable()
         
-        # Create basedir
-        os.makedirs(self.logdir, exist_ok=True)
+    def info_print(self, info):
+        print(f"- {info}")
 
     def set_logdir(self, basedir):
+        """
+        Set the log directory.
+        ----
+        Input:
+        - basedir: str. Path to directory. 
+        """
         self.logdir = basedir
+        os.makedirs(self.logdir, exist_ok=True)
+        self.summary_writer = SummaryWriter(self.logdir)
 
     def set_mode(self, debug=True):
         """
@@ -102,7 +109,7 @@ class Logger:
             info = f"Write json file to {write_path}"
             self.debug_print(info)
 
-logger = Logger(logdir='.', debug=True)
+logger = Logger(debug=True)
 
 if __name__ == "__main__":
     import numpy as np
@@ -113,7 +120,7 @@ if __name__ == "__main__":
                  'University' : "Northeastern Univ"}
 
     logdir = 'log'
-    logger = Logger(logdir=logdir, debug=True)
+    logger = Logger(debug=True)
 
     logger.debug_print(test_dict)
     logger.debug_print(test_image.shape)

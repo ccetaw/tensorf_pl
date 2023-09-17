@@ -17,11 +17,10 @@ class TensorVMBase(nn.Module):
                  device,         # str. 'cuda' or 'cpu'.
                  ) -> None:
         super().__init__()
-        self.update_aabb(aabb, grid_size)
         self.n_comp = n_comp
         self.value_offset = value_offset
         self.device = device
-        logger = logger
+        self.update_aabb(aabb, grid_size)
 
         self.mat_mode = [[0,1], [0,2], [1,2]]
         self.vec_mode =  [2, 1, 0]
@@ -62,14 +61,18 @@ class TensorVMBase(nn.Module):
         - aabb: Tensor [2, 3]. Top left and bottom right.
         - grid_size: List [3,]. Grid size.
         """
-        self.aabb = aabb
+        self.aabb = torch.tensor(aabb, device=self.device)
         self.grid_size= torch.LongTensor(grid_size).to(self.device)
 
         self.aabb_size = self.aabb[1] - self.aabb[0]
         self.invaabb_size = 2.0/self.aabb_size
-        self.units=self.aabbSize / (self.grid_size-1)
+        self.units=self.aabb_size/ (self.grid_size-1)
         self.aabb_diag = torch.sqrt(torch.sum(torch.square(self.aabb_size)))
 
+        info = f"{self.__class__.__name__} current grid size {self.grid_size.tolist()}, aabb {self.aabb.tolist()}"
+        logger.info_print(info)
+
+    @torch.no_grad()
     def shrink(self, new_aabb):
         """
         Shrink the aabb to bound tighter. Keep units unchanged.
@@ -78,18 +81,17 @@ class TensorVMBase(nn.Module):
         - new_aabb: Tensor [2, 3]. Top left and bottom right.
         """
 
+        info = f"{self.__class__.__name__} shrinks to {new_aabb.tolist()}"
+        logger.info_print(info)
+
         # Select grid inside new_aabb
         xyz_min, xyz_max = new_aabb
         t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
         t_l, b_r = torch.round(torch.round(t_l)).long(), torch.round(b_r).long() + 1
         b_r = torch.stack([b_r, self.grid_size]).amin(0)
 
-        # ---- DEBUG ---- #
-        logger.debug_print(xyz_min)
-        logger.debug_print(xyz_max)
         logger.debug_print(t_l)
         logger.debug_print(b_r)
-        # ---- DEBUG ---- #
 
         for i in range(len(self.vec_mode)):
             mode0 = self.vec_mode[i]
@@ -105,16 +107,15 @@ class TensorVMBase(nn.Module):
         correct_aabb[0] = (1-t_l_r)*self.aabb[0] + t_l_r*self.aabb[1]
         correct_aabb[1] = (1-b_r_r)*self.aabb[0] + b_r_r*self.aabb[1]
 
-        # ---- DEBUG ---- #
-        logger.debug_print(new_aabb)
-        logger.debug_print(correct_aabb)
-        # ---- DEBUG ---- #
+        logger.debug_print(t_l_r)
+        logger.debug_print(b_r_r)
 
         new_aabb = correct_aabb
         new_size = b_r - t_l
 
-        self.update_aabb(new_aabb, new_size)
+        self.update_aabb(new_aabb, (new_size[0], new_size[1], new_size[2]))
 
+    @torch.no_grad()
     def upsample(self, res_target):
         """
         Upsample the grid to the target resolution. Up sample planes and lines separately. 
@@ -131,19 +132,16 @@ class TensorVMBase(nn.Module):
             self.lines[i] = torch.nn.Parameter(
                 F.interpolate(self.lines[i].data, size=(res_target[vec_id], 1), mode='bilinear', align_corners=True))
 
-        # ---- DEBUG ---- #
-        logger.debug_print(self.planes[0].shape)
-        logger.debug_print(self.lines[0].shape)
-        # ---- DEBUG ---- #
+        info = f"{self.__class__.__name__} upsample to {res_target}"
+        logger.info_print(info)
 
         self.update_aabb(self.aabb, res_target)
-
     
  
 class TensorVM3D(TensorVMBase):
 
-    def __init__(self, aabb, grid_size, n_comp, value_offset, device, activation) -> None:
-        super().__init__(aabb, grid_size, n_comp, value_offset, device)
+    def __init__(self, aabb, grid_size, n_comp, value_offset, activation, device) -> None:
+        super(TensorVM3D, self).__init__(aabb, grid_size, n_comp, value_offset, device)
         self.activation = activation
 
     def get_kwargs(self):
@@ -153,7 +151,7 @@ class TensorVM3D(TensorVMBase):
         return {
             'aabb': self.aabb,
             'grid_size': self.grid_size.tolist(),
-            'n_comp': self.density_n_comp,
+            'n_comp': self.n_comp,
             'value_offset': self.value_offset,
             'activation': self.activation
         }
@@ -173,11 +171,6 @@ class TensorVM3D(TensorVMBase):
         coordinate_line = torch.stack((xyz_locs[..., self.vec_mode[0]], xyz_locs[..., self.vec_mode[1]], xyz_locs[..., self.vec_mode[2]]))
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
 
-        # ---- DEBUG ---- #
-        logger.debug_print(coordinate_plane.shape)
-        logger.debug_print(coordinate_line.shape)
-        # ---- DEBUG ---- #
-
         feature = torch.zeros((xyz_locs.shape[0],), device=xyz_locs.device)
         for idx_plane in range(len(self.planes)):
             """
@@ -192,24 +185,15 @@ class TensorVM3D(TensorVMBase):
                                             align_corners=True).view(-1, *xyz_locs.shape[:1])
             feature = feature + torch.sum(plane_coef_point * line_coef_point, dim=0)
 
-        # ---- DEBUG ---- #
-            logger.debug_print(plane_coef_point.shape)
-            logger.debug_print(line_coef_point.shape)
-            logger.debug_print(feature.shape)
-        # ---- DEBUG ---- #
-
-        if self.activation is not None:
-            feature = self.activation(feature, self.value_offset) # offset will be added for softplus activation but not for relu
-
         return feature
 
 
 class TensorVM4D(TensorVMBase):
     
-    def __init__(self, aabb, grid_size, n_comp, value_offset, device, activation, dim_4d=1) -> None:
-        super().__init__(aabb, grid_size, n_comp, value_offset, device)
-        self.activation = activation
+    def __init__(self, aabb, grid_size, n_comp, value_offset, activation, dim_4d, device) -> None:
+        super(TensorVM4D, self).__init__(aabb, grid_size, n_comp, value_offset, device)
 
+        self.activation = activation
         self.dim_4d = dim_4d
         self.basis_mat = torch.nn.Linear(sum(self.n_comp), self.dim_4d, bias=False).to(device)
 
@@ -220,10 +204,10 @@ class TensorVM4D(TensorVMBase):
         return {
             'aabb': self.aabb,
             'grid_size': self.grid_size.tolist(),
-            'n_comp': self.density_n_comp,
+            'n_comp': self.n_comp,
             'value_offset': self.value_offset,
+            'activation': self.activation,
             'dim_4d': self.dim_4d,
-            'activation': self.activation
         }
 
     def forward(self, xyz_locs):
@@ -241,11 +225,6 @@ class TensorVM4D(TensorVMBase):
         coordinate_line = torch.stack((xyz_locs[..., self.vec_mode[0]], xyz_locs[..., self.vec_mode[1]], xyz_locs[..., self.vec_mode[2]]))
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
 
-        # ---- DEBUG ---- #
-        logger.debug_print(coordinate_plane.shape)
-        logger.debug_print(coordinate_line.shape)
-        # ---- DEBUG ---- #
-
         plane_coef_point,line_coef_point = [],[]
         for idx_plane in range(len(self.planes)):
             plane_coef_point.append(F.grid_sample(self.planes[idx_plane], coordinate_plane[[idx_plane]],
@@ -256,14 +235,5 @@ class TensorVM4D(TensorVMBase):
 
         feature = torch.zeros(xyz_locs.shape[0], self.dim_4d)
         feature = self.basis_mat((plane_coef_point * line_coef_point).T) 
-
-        # ---- DEBUG ---- #
-        logger.debug_print(plane_coef_point)
-        logger.debug_print(line_coef_point)
-        logger.debug_print(feature)
-        # ---- DEBUG ---- #
-
-        if self.activation is not None:
-            feature = self.activation(feature, self.value_offset)
 
         return feature

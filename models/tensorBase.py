@@ -307,12 +307,9 @@ class TensorBase(torch.nn.Module):
             rng += torch.rand_like(rng[:,[0]])
         step = stepsize * rng.to(rays_o.device)
         interpx = (t_min[...,None] + step)
-
-        print(rays_o.shape)
         
         rays_pts = rays_o[...,None,:] + rays_d[...,None,:] * interpx[...,None] # [batch_size, N_samples, 3]
 
-        print(rays_pts.shape)
         mask_outbbox = ((self.aabb[0]>rays_pts) | (rays_pts>self.aabb[1])).any(dim=-1)
 
         return rays_pts, interpx, ~mask_outbbox # Return all points and filter
@@ -423,7 +420,7 @@ class TensorBase(torch.nn.Module):
         ---------- 
         Input:
         xyz_locs: Tensor, shape=[n_points, 3]. Coordinates of points.
-        length: float. assumed interval
+        length: float. Usally = step size.
 
         Return:
         alpha: Tensor, shape=[n_points, ]. 0 for invalid points
@@ -433,7 +430,6 @@ class TensorBase(torch.nn.Module):
             alpha_mask = alphas > 0
         else:
             alpha_mask = torch.ones_like(xyz_locs[:,0], dtype=bool)
-            
 
         sigma = torch.zeros(xyz_locs.shape[:-1], device=xyz_locs.device) 
 
@@ -467,6 +463,12 @@ class TensorBase(torch.nn.Module):
         
         if self.alphaMask is not None:
             # Filter out points with invalid alpha values
+            """
+            When accessing the contents of a tensor via indexing, 
+            PyTorch follows Numpy behaviors that basic indexing returns views, 
+            while advanced indexing returns a copy. 
+            Assignment via either basic or advanced indexing is in-place.
+            """
             alphas = self.alphaMask.sample_alpha(xyz_sampled[ray_valid])
             alpha_mask = alphas > 0
             ray_invalid = ~ray_valid
