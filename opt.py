@@ -66,8 +66,8 @@ def config_parser(cmd=None):
                         help='loss weight')
     
     # model
-    parser.add_argument('--model_name', type=str, default='TensorVMSplit',
-                        choices=['TensorVMSplit', 'TensorCP', 'NeRFRenderer'])
+    parser.add_argument('--model_name', type=str, default='NeRFRenderer',
+                        choices=['PBRenderer', 'NeRFRenderer'])
         # volume options
     parser.add_argument("--n_lamb_sh", type=int, action="append")
     parser.add_argument("--n_lamb_sigma", type=int, action="append")
