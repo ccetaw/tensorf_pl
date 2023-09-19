@@ -61,7 +61,7 @@ class TensorVMBase(nn.Module):
         - aabb: Tensor [2, 3]. Top left and bottom right.
         - grid_size: List [3,]. Grid size.
         """
-        self.aabb = torch.tensor(aabb, device=self.device)
+        self.aabb = aabb
         self.grid_size= torch.LongTensor(grid_size).to(self.device)
 
         self.aabb_size = self.aabb[1] - self.aabb[0]
@@ -69,11 +69,11 @@ class TensorVMBase(nn.Module):
         self.units=self.aabb_size/ (self.grid_size-1)
         self.aabb_diag = torch.sqrt(torch.sum(torch.square(self.aabb_size)))
 
-        info = f"{self.__class__.__name__} current grid size {self.grid_size.tolist()}, aabb {self.aabb.tolist()}"
+        info = f"{self.__class__.__name__} current grid size {self.grid_size.tolist()}, aabb {self.aabb.view(-1)}"
         logger.info_print(info)
 
     @torch.no_grad()
-    def shrink(self, new_aabb):
+    def shrink(self, new_aabb, occupancy_grid):
         """
         Shrink the aabb to bound tighter. Keep units unchanged.
         ----
@@ -81,7 +81,7 @@ class TensorVMBase(nn.Module):
         - new_aabb: Tensor [2, 3]. Top left and bottom right.
         """
 
-        info = f"{self.__class__.__name__} shrinks to {new_aabb.tolist()}"
+        info = f"{self.__class__.__name__} shrinks to {new_aabb.view(-1)}"
         logger.info_print(info)
 
         # Select grid inside new_aabb
@@ -90,8 +90,6 @@ class TensorVMBase(nn.Module):
         t_l, b_r = torch.round(torch.round(t_l)).long(), torch.round(b_r).long() + 1
         b_r = torch.stack([b_r, self.grid_size]).amin(0)
 
-        logger.debug_print(t_l)
-        logger.debug_print(b_r)
 
         for i in range(len(self.vec_mode)):
             mode0 = self.vec_mode[i]
@@ -102,15 +100,13 @@ class TensorVMBase(nn.Module):
                 self.planes[i].data[...,t_l[mode1]:b_r[mode1],t_l[mode0]:b_r[mode0]])
         
         # Clamp new_aabb to outer grid point
-        t_l_r, b_r_r = t_l / (self.grid_size-1), (b_r-1) / (self.grid_size-1)
-        correct_aabb = torch.zeros_like(new_aabb)
-        correct_aabb[0] = (1-t_l_r)*self.aabb[0] + t_l_r*self.aabb[1]
-        correct_aabb[1] = (1-b_r_r)*self.aabb[0] + b_r_r*self.aabb[1]
+        if not torch.all(occupancy_grid.grid_size == self.grid_size):
+            t_l_r, b_r_r = t_l / (self.grid_size-1), (b_r-1) / (self.grid_size-1)
+            correct_aabb = torch.zeros_like(new_aabb)
+            correct_aabb[0] = (1-t_l_r)*self.aabb[0] + t_l_r*self.aabb[1]
+            correct_aabb[1] = (1-b_r_r)*self.aabb[0] + b_r_r*self.aabb[1]
+            new_aabb = correct_aabb
 
-        logger.debug_print(t_l_r)
-        logger.debug_print(b_r_r)
-
-        new_aabb = correct_aabb
         new_size = b_r - t_l
 
         self.update_aabb(new_aabb, (new_size[0], new_size[1], new_size[2]))
@@ -142,7 +138,7 @@ class TensorVM3D(TensorVMBase):
 
     def __init__(self, aabb, grid_size, n_comp, value_offset, activation, device) -> None:
         super(TensorVM3D, self).__init__(aabb, grid_size, n_comp, value_offset, device)
-        self.activation = activation
+        self.activation = activation  # Activation is not initialized here as there might be multiple decoders
 
     def get_kwargs(self):
         """
@@ -193,7 +189,7 @@ class TensorVM4D(TensorVMBase):
     def __init__(self, aabb, grid_size, n_comp, value_offset, activation, dim_4d, device) -> None:
         super(TensorVM4D, self).__init__(aabb, grid_size, n_comp, value_offset, device)
 
-        self.activation = activation
+        self.activation = activation # Activation is not initialized here as there might be multiple decoders
         self.dim_4d = dim_4d
         self.basis_mat = torch.nn.Linear(sum(self.n_comp), self.dim_4d, bias=False).to(device)
 
@@ -233,7 +229,4 @@ class TensorVM4D(TensorVMBase):
                                                  align_corners=True).view(-1, *xyz_locs.shape[:1]))
         plane_coef_point, line_coef_point = torch.cat(plane_coef_point), torch.cat(line_coef_point)
 
-        feature = torch.zeros(xyz_locs.shape[0], self.dim_4d)
-        feature = self.basis_mat((plane_coef_point * line_coef_point).T) 
-
-        return feature
+        return self.basis_mat((plane_coef_point * line_coef_point).T) 

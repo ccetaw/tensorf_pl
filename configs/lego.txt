@@ -22,7 +22,7 @@ n_lamb_sh = [48,48,48]
 model_name = NeRFRenderer
 
 
-fea2appAct = MLP_Fea
+shadingMode = MLP_Fea
 fea2denseAct = softplus
 
 view_pe = 2

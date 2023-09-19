@@ -94,7 +94,7 @@ class Logger:
         write_path = self._prepare_dir(path)
         with open(write_path, 'w') as f:
             for key, value in dict_.items(): 
-                f.write('%s:%s\n' % (key, value))
+                f.write('%s = %s\n' % (key, value))
 
         if self.debug:
             info = f"Write txt file to {write_path}"

@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import time
 from logger import logger
 from .tensorVM import TensorVM3D, TensorVM4D
-from .alpha_grid import AlphaGridMask
+from .alpha_grid import AlphaGrid
 from .sh import eval_sh_bases
 
 
@@ -54,6 +54,8 @@ def SHRender(xyz_sampled, viewdirs, features):
     rgb_sh = features.view(-1, 3, sh_mult.shape[-1])
     rgb = torch.relu(torch.sum(sh_mult * rgb_sh, dim=-1) + 0.5)
     return rgb
+
+
 
 """
 Three types of MLP that turn appearance feature to radiance are implemented.
@@ -171,7 +173,7 @@ class NeRFRenderer(nn.Module):
 
         self.DensityField = TensorVM3D(**density_field_config, device=self.device)
         self.RadianceField = TensorVM4D(**radiance_field_config, device=self.device)
-        self.OccupancyGrid = AlphaGridMask(**occupancy_grid_config, device=self.device)
+        self.OccupancyGrid = AlphaGrid(**occupancy_grid_config, device=self.device)
 
         self.update_stepsize()
         self.init_activations()
@@ -231,6 +233,7 @@ class NeRFRenderer(nn.Module):
             grad_vars += [{'params':self.feature2rgb.parameters(), 'lr':lr_init_network}]
         return grad_vars
 
+    @torch.no_grad()
     def filter_rays(self, all_rays, all_rgbs, n_samples=256, chunk=10240*5, bbox_only=False):
         """
         Filter out rays that do not hit the bounding box
@@ -265,6 +268,82 @@ class NeRFRenderer(nn.Module):
 
         print(f'Ray filtering done! takes {time.time()-tt} s. ray mask ratio: {torch.sum(mask_filtered) / N}')
         return all_rays[mask_filtered], all_rgbs[mask_filtered]
+
+    @torch.no_grad()
+    def _compute_alpha_from_density_field(self, xyz_locs):
+        # Filter out points outside original alpha grid mask to reduce computations.
+        if self.OccupancyGrid.alpha_volume is not None:
+            alphas = self.OccupancyGrid.sample_alpha(xyz_locs)
+            alpha_mask = alphas > 0
+        else:
+            alpha_mask = torch.ones_like(xyz_locs[:,0], dtype=bool)
+
+        sigma = torch.zeros(xyz_locs.shape[:-1], device=xyz_locs.device) 
+
+        if alpha_mask.any():
+            xyz_sampled = self.DensityField.normalize_coord(xyz_locs[alpha_mask])
+            sigma_feature = self.DensityField(xyz_sampled)
+            validsigma = self.feature2density(sigma_feature)
+            sigma[alpha_mask] = validsigma
+
+        alpha = 1 - torch.exp(-sigma*self.step_size).view(xyz_locs.shape[:-1])
+
+        return alpha
+
+    @torch.no_grad()
+    def update_alpha_volume(self, grid_size):
+        """
+        Update the alpha mask and get the new bounding box.
+        Grid size changes dynamically during training.
+        ----
+        Inputs:
+        - density_field: Instance of class TensorVM3D. 
+        - grid_size: List of ints. 
+        - step_size: float.
+
+        Outputs:
+        - new_aabb: Tensor [2,3]. New AABB for density field. 
+        """
+        grid_size = self.DensityField.grid_size if grid_size is None else grid_size # Use density field grid if None
+
+        # Uniform grid sampling
+        samples = torch.stack(torch.meshgrid(
+            torch.linspace(0, 1, grid_size[0]),
+            torch.linspace(0, 1, grid_size[1]),
+            torch.linspace(0, 1, grid_size[2]),
+        ), -1).to(self.device)
+        dense_xyz = self.DensityField.aabb[0] * (1-samples) + self.DensityField.aabb[1] * samples # [grid_size[0], grid_size[1], grid_size[2], 3], gives the coordinates of grid points
+
+        alpha = torch.zeros_like(dense_xyz[...,0]) # [grid_size[0], grid_size[1], grid_size[2]]
+        for i in range(grid_size[0]): # Avoid oom by slicing
+            alpha[i] = self._compute_alpha_from_density_field(dense_xyz[i].view(-1,3)).view((grid_size[1], grid_size[2]))
+
+        logger.debug_print(alpha.mean())
+        logger.debug_print(alpha.max())
+        
+        dense_xyz = dense_xyz.transpose(0,2).contiguous() # [grid_size[2], grid_size[1], grid_size[0], 3]
+        alpha = alpha.clamp(0,1).transpose(0,2).contiguous()[None,None] # [1, 1, grid_size[2], grid_size[1], grid_size[0]]
+        total_voxels = grid_size[0] * grid_size[1] * grid_size[2]
+
+        ks = 3
+        alpha = F.max_pool3d(alpha, kernel_size=ks, padding=ks // 2, stride=1).view(grid_size[::-1]) # [grid[2], grid[1], grid[0]]
+        alpha[alpha>=self.OccupancyGrid.thres] = 1
+        alpha[alpha<self.OccupancyGrid.thres] = 0
+        self.OccupancyGrid.update_aabb(self.DensityField.aabb, grid_size)
+        self.OccupancyGrid.alpha_volume = alpha.view(1,1,*alpha.shape[-3:]) # Additional dimension for grid_sample
+        
+        valid_xyz = dense_xyz[alpha>0.5]
+
+        xyz_min = valid_xyz.amin(0)
+        xyz_max = valid_xyz.amax(0)
+
+        new_aabb = torch.stack((xyz_min, xyz_max))
+
+        total = torch.sum(alpha)
+        info = f"New bbox: {new_aabb.view(-1)} alpha rest %%%f"%(total/total_voxels*100)
+        logger.info_print(info)
+
+        return new_aabb
 
     def stratified_sample_points(self, rays_o, rays_d, is_train=True, n_samples=-1):
         """
@@ -361,7 +440,7 @@ class NeRFRenderer(nn.Module):
         viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled.shape)
         
         # Again filter points using OccupancyGrid
-        if self.OccupancyGrid.initialized: 
+        if self.OccupancyGrid.alpha_volume is not None: 
             # Filter out points with invalid alpha values
             alphas = self.OccupancyGrid.sample_alpha(xyz_sampled[ray_valid])
             alpha_mask = alphas > 0

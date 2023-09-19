@@ -1,6 +1,4 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 import json
 import sys
@@ -14,6 +12,7 @@ from models.renderer import NeRFRenderer
 from loss import *
 from opt import config_parser
 from eval import *
+from metrics import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -25,7 +24,8 @@ def reconstruction(args):
     else:
         logfolder = f'{args.basedir}/{args.expname}'
     logger.set_logdir(logfolder)
-    logger.set_mode(debug=True)
+    logger.set_mode(debug=False) # Set True to print debug information
+    logger.write_dict2txt('config.txt', vars(args)) # Save config of this run to logdir
 
     # Load dataset
     dataset = dataset_dict[args.dataset_name]
@@ -61,7 +61,7 @@ def reconstruction(args):
             'n_comp': args.n_lamb_sh,
             'value_offset': None,
             'activation': {
-                'MLP': args.fea2appAct,
+                'MLP': args.shadingMode,
                 'pos_pe': args.pos_pe,
                 'view_pe': args.view_pe,
                 'fea_pe': args.fea_pe,
@@ -71,10 +71,9 @@ def reconstruction(args):
         }
 
         occupancy_grid_config = {
-            'aabb': aabb,
-            'grid_size': reso_cur,
+            'aabb': None,                   # Initially we don't have a occupancy grid
+            'grid_size': None,
             'threshold': args.alpha_mask_thre,
-            'initialized': False,
         }
 
         renderer_config = {
@@ -82,7 +81,7 @@ def reconstruction(args):
             'step_ratio': args.step_ratio,
             'distance_scale': args.distance_scale,
             'n_samples': n_samples,
-            'ray_march_weight_thres': 0.001,
+            'ray_march_weight_thres': args.rm_weight_mask_thre,
             'density_field_config': density_field_config,
             'radiance_field_config': radiance_field_config,
             'occupancy_grid_config': occupancy_grid_config
@@ -97,6 +96,9 @@ def reconstruction(args):
     else:
         args.lr_decay_iters = args.n_iters
         lr_factor = args.lr_decay_target_ratio**(1/args.n_iters)
+
+    print("lr decay", args.lr_decay_target_ratio, args.lr_decay_iters)
+    print("lr factor", lr_factor)
     
     optimizer = torch.optim.Adam(grad_vars, betas=(0.9,0.99))
 
@@ -109,6 +111,15 @@ def reconstruction(args):
     L1_reg_weight = args.L1_weight_inital
     TV_weight_density, TV_weight_app = args.TV_weight_density, args.TV_weight_app
 
+    weights_dict = {
+        'ortho_reg_weight': Ortho_reg_weight,
+        'L1_reg_weight': L1_reg_weight,
+        'TV_weight_density': TV_weight_density,
+        'TV_weight_app': TV_weight_app
+    }
+
+    print("Initial loss weights ", weights_dict)
+
     allrays, allrgbs = train_dataset.all_rays, train_dataset.all_rgbs
     if not args.ndc_ray:
         allrays, allrgbs = Renderer.filter_rays(allrays, allrgbs, bbox_only=True)
@@ -118,6 +129,8 @@ def reconstruction(args):
     upsamp_list = args.upsamp_list
     update_AlphaMask_list = args.update_AlphaMask_list
     N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(args.N_voxel_init), np.log(args.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:] #linear in logrithmic space
+
+    print("Voxel list ", N_voxel_list)
 
     # Start training
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
@@ -191,12 +204,11 @@ def reconstruction(args):
         if iteration in update_AlphaMask_list:
             if reso_cur[0] * reso_cur[1] * reso_cur[2]<256**3:# update volume resolution
                 reso_mask = reso_cur
-            new_aabb = Renderer.OccupancyGrid.update_alpha_volume(Renderer.DensityField, tuple(reso_mask), Renderer.step_size)
+            new_aabb = Renderer.update_alpha_volume(tuple(reso_mask))
             if iteration == update_AlphaMask_list[0]:
-                Renderer.DensityField.shrink(new_aabb)
-                Renderer.RadianceField.shrink(new_aabb)
+                Renderer.DensityField.shrink(new_aabb, Renderer.OccupancyGrid)
+                Renderer.RadianceField.shrink(new_aabb,Renderer.OccupancyGrid)
                 Renderer.update_stepsize()
-                # tensorVM.alphaMask = None
                 L1_reg_weight = args.L1_weight_rest
                 logger.info_print(f"L1_reg_weight reset: {L1_reg_weight}")
 
@@ -249,8 +261,8 @@ def reconstruction(args):
 if __name__ == '__main__':
 
     torch.set_default_dtype(torch.float32)
-    torch.manual_seed(20221030)
-    np.random.seed(20221030)
+    torch.manual_seed(20211202)
+    np.random.seed(20211202)
 
     args = config_parser()
     print(json.dumps(vars(args), indent=4))

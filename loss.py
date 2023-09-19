@@ -7,7 +7,7 @@ def vector_diffs(lines):
     Input:
     - lines: List of vectors(1D Tensor). 
     """
-    total = torch.tensor(0.0)
+    total = 0
     
     for idx in range(len(lines)):
         n_comp, n_size = lines[idx].shape[1:-1]
@@ -26,11 +26,13 @@ def L1_VM(planes, lines):
     - planes: List of matrices(2D Tensor). VM decomposition planes.
     - lines: List of vectors(1D Tensor). VM decomposition lines.
     """
-    total = torch.tensor(0.0) 
+    total = 0
     for idx in range(len(planes)):
         total = total + torch.mean(torch.abs(planes[idx])) + torch.mean(torch.abs(lines[idx]))# + torch.mean(torch.abs(self.app_plane[idx])) + torch.mean(torch.abs(self.planes[idx]))
     return total
 
+def _tensor_size(t):
+    return t.size()[1]*t.size()[2]*t.size()[3]
 
 def _TVloss(x):
     batch_size = x.size()[0]
@@ -42,10 +44,7 @@ def _TVloss(x):
     w_tv = torch.pow((x[:,:,:,1:]-x[:,:,:,:w_x-1]),2).sum()
     return 2*(h_tv/count_h+w_tv/count_w)/batch_size
 
-def _tensor_size(t):
-    return t.size()[1]*t.size()[2]*t.size()[3]
-
-def TVloss(planes):
+def TVloss(planes, factor=1e-2):
     """
     Total variation loss. 
     ----
@@ -54,7 +53,7 @@ def TVloss(planes):
     """
     total = 0
     for idx in range(len(planes)):
-        total = total + _TVloss(planes[idx]) * 1e-2 #+ reg(self.density_line[idx]) * 1e-3
+        total = total + _TVloss(planes[idx]) * factor #+ reg(self.density_line[idx]) * 1e-3
     return total
 
 
