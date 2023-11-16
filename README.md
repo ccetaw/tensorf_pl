@@ -25,13 +25,13 @@ The original structure is decomposed to:
 - A renderer that implements the rendering algorithm 
 
 This decomposition makes modules reusable and could be furthur used for other applications 
-such as inverse rendering.
+such as inverse rendering, semantic segmentation.
 
 ## Results
 
 | G.T. | Original | This repo |
 | ---- | -------- | --------- |
-| ![gt](./res/gt.png) | ![original](./res/original.png) | ![pl](./res/pl.png) |
+| <img align="center" src="./res/gt.png" width="300"> | <img align="center" src="./res/original.png" width="300"> | <img align="center" src="./res/pl.png" width="300">  |
 
 For lego scene, on a single RTX 2080, with batch size 4096 and 30000 iters
 
@@ -40,5 +40,5 @@ For lego scene, on a single RTX 2080, with batch size 4096 and 30000 iters
 | Original | 25:30 | 35.51 |
 | PL | 22:14 | 35.53 |
 
-Other metrics(LPIPS, SSIM) are similar to valus reported in original paper. 
+Other metrics(LPIPS, SSIM) are similar to valus reported in [original paper](https://apchenstu.github.io/TensoRF/). 
 
