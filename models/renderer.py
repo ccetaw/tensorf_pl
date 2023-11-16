@@ -157,6 +157,8 @@ class NeRFRenderer(nn.Module):
                  step_ratio,
                  distance_scale,
                  n_samples,
+                 white_bg,
+                 ndc_ray,
                  ray_march_weight_thres,
                  density_field_config,
                  radiance_field_config,
@@ -168,12 +170,13 @@ class NeRFRenderer(nn.Module):
         self.distance_scale = distance_scale
         self.ray_march_weight_thres = ray_march_weight_thres
         self.n_samples = n_samples
-        
+        self.white_bg = white_bg,
+        self.ndc_ray = ndc_ray
         self.device = device
 
-        self.DensityField = TensorVM3D(**density_field_config, device=self.device)
-        self.RadianceField = TensorVM4D(**radiance_field_config, device=self.device)
-        self.OccupancyGrid = AlphaGrid(**occupancy_grid_config, device=self.device)
+        self.DensityField = TensorVM3D(**density_field_config, device=device)
+        self.RadianceField = TensorVM4D(**radiance_field_config, device=device)
+        self.OccupancyGrid = AlphaGrid(**occupancy_grid_config, device=device)
 
         self.update_stepsize()
         self.init_activations()
@@ -234,7 +237,7 @@ class NeRFRenderer(nn.Module):
         return grad_vars
 
     @torch.no_grad()
-    def filter_rays(self, all_rays, all_rgbs, n_samples=256, chunk=10240*5, bbox_only=False):
+    def filter_rays(self, all_rays, all_rgbs, chunk=10240*5, bbox_only=False):
         """
         Filter out rays that do not hit the bounding box
         """
@@ -257,9 +260,8 @@ class NeRFRenderer(nn.Module):
                 t_min = torch.minimum(rate_a, rate_b).amax(-1)#.clamp(min=near, max=far)
                 t_max = torch.maximum(rate_a, rate_b).amin(-1)#.clamp(min=near, max=far)
                 mask_inbbox = t_max > t_min
-
             else:
-                xyz_sampled, _, _ = self.stratified_sample_points(rays_o, rays_d, n_samples=n_samples, is_train=False)
+                xyz_sampled, _, _ = self.stratified_sample_points(rays_o, rays_d, is_train=False)
                 mask_inbbox= (self.OccupancyGrid.sample_alpha(xyz_sampled).view(xyz_sampled.shape[:-1]) > 0).any(-1)
 
             mask_filtered.append(mask_inbbox.cpu())
@@ -269,83 +271,7 @@ class NeRFRenderer(nn.Module):
         print(f'Ray filtering done! takes {time.time()-tt} s. ray mask ratio: {torch.sum(mask_filtered) / N}')
         return all_rays[mask_filtered], all_rgbs[mask_filtered]
 
-    @torch.no_grad()
-    def _compute_alpha_from_density_field(self, xyz_locs):
-        # Filter out points outside original alpha grid mask to reduce computations.
-        if self.OccupancyGrid.alpha_volume is not None:
-            alphas = self.OccupancyGrid.sample_alpha(xyz_locs)
-            alpha_mask = alphas > 0
-        else:
-            alpha_mask = torch.ones_like(xyz_locs[:,0], dtype=bool)
-
-        sigma = torch.zeros(xyz_locs.shape[:-1], device=xyz_locs.device) 
-
-        if alpha_mask.any():
-            xyz_sampled = self.DensityField.normalize_coord(xyz_locs[alpha_mask])
-            sigma_feature = self.DensityField(xyz_sampled)
-            validsigma = self.feature2density(sigma_feature)
-            sigma[alpha_mask] = validsigma
-
-        alpha = 1 - torch.exp(-sigma*self.step_size).view(xyz_locs.shape[:-1])
-
-        return alpha
-
-    @torch.no_grad()
-    def update_alpha_volume(self, grid_size):
-        """
-        Update the alpha mask and get the new bounding box.
-        Grid size changes dynamically during training.
-        ----
-        Inputs:
-        - density_field: Instance of class TensorVM3D. 
-        - grid_size: List of ints. 
-        - step_size: float.
-
-        Outputs:
-        - new_aabb: Tensor [2,3]. New AABB for density field. 
-        """
-        grid_size = self.DensityField.grid_size if grid_size is None else grid_size # Use density field grid if None
-
-        # Uniform grid sampling
-        samples = torch.stack(torch.meshgrid(
-            torch.linspace(0, 1, grid_size[0]),
-            torch.linspace(0, 1, grid_size[1]),
-            torch.linspace(0, 1, grid_size[2]),
-        ), -1).to(self.device)
-        dense_xyz = self.DensityField.aabb[0] * (1-samples) + self.DensityField.aabb[1] * samples # [grid_size[0], grid_size[1], grid_size[2], 3], gives the coordinates of grid points
-
-        alpha = torch.zeros_like(dense_xyz[...,0]) # [grid_size[0], grid_size[1], grid_size[2]]
-        for i in range(grid_size[0]): # Avoid oom by slicing
-            alpha[i] = self._compute_alpha_from_density_field(dense_xyz[i].view(-1,3)).view((grid_size[1], grid_size[2]))
-
-        logger.debug_print(alpha.mean())
-        logger.debug_print(alpha.max())
-        
-        dense_xyz = dense_xyz.transpose(0,2).contiguous() # [grid_size[2], grid_size[1], grid_size[0], 3]
-        alpha = alpha.clamp(0,1).transpose(0,2).contiguous()[None,None] # [1, 1, grid_size[2], grid_size[1], grid_size[0]]
-        total_voxels = grid_size[0] * grid_size[1] * grid_size[2]
-
-        ks = 3
-        alpha = F.max_pool3d(alpha, kernel_size=ks, padding=ks // 2, stride=1).view(grid_size[::-1]) # [grid[2], grid[1], grid[0]]
-        alpha[alpha>=self.OccupancyGrid.thres] = 1
-        alpha[alpha<self.OccupancyGrid.thres] = 0
-        self.OccupancyGrid.update_aabb(self.DensityField.aabb, grid_size)
-        self.OccupancyGrid.alpha_volume = alpha.view(1,1,*alpha.shape[-3:]) # Additional dimension for grid_sample
-        
-        valid_xyz = dense_xyz[alpha>0.5]
-
-        xyz_min = valid_xyz.amin(0)
-        xyz_max = valid_xyz.amax(0)
-
-        new_aabb = torch.stack((xyz_min, xyz_max))
-
-        total = torch.sum(alpha)
-        info = f"New bbox: {new_aabb.view(-1)} alpha rest %%%f"%(total/total_voxels*100)
-        logger.info_print(info)
-
-        return new_aabb
-
-    def stratified_sample_points(self, rays_o, rays_d, is_train=True, n_samples=-1):
+    def stratified_sample_points(self, rays_o, rays_d, is_train=True):
         """
         Sample points on rays. Use stratified sampling during training and uniform sampling during evaluation.
         ----
@@ -353,14 +279,13 @@ class NeRFRenderer(nn.Module):
         - rays_o: Tensor [batch_size, 3]. Ray origins.
         - rays_d: Tensor [batch_size, 3]. Ray directions.
         - is_train: bool. 
-        - n_samples: int. Number of points to be sampled.
 
         Outputs:
         - rays_pts: Tensor [batch_size, n_samples, 3]. Spatial coordinates.
         - interpx: Tensor []. 
         - mask_inbox: bool Tensor [batch_size, n_samples]. Indicating in/outside bounding box. 
         """
-        n_samples = n_samples if n_samples>0 else self.n_samples
+        n_samples = self.n_samples
 
         step_size = self.step_size # Same step size for every ray
         near, far = self.near_far
@@ -400,7 +325,7 @@ class NeRFRenderer(nn.Module):
         - interpx: Tensor []. 
         - mask_inbox: bool Tensor [batch_size, n_samples]. Indicating in/outside bounding box. 
         """
-        n_samples = n_samples if n_samples > 0 else self.n_samples
+        n_samples = self.n_samples
         near, far = self.near_far
         interpx = torch.linspace(near, far, n_samples).unsqueeze(0).to(rays_o)
         if is_train:
@@ -410,15 +335,12 @@ class NeRFRenderer(nn.Module):
         mask_outbbox = ((self.DensityField.aabb[0] > rays_pts) | (rays_pts > self.DensityField.aabb[1])).any(dim=-1)
         return rays_pts, interpx, ~mask_outbbox
 
-    def forward(self, rays_chunk, white_bg=True, is_train=True, ndc_ray=False, n_samples=-1):
+    def _forward(self, rays_chunk):
         """
         NeRF-style volumetric rendering. Render rgb colors as well as other values given rays.
         ----
         Inputs:
         - rays_chunk: Tensor [chunk_size, 6]. Ray origins and directions.
-        - white_bg: bool. If the background is white.
-        - is_train: bool. Flag.
-        - n_samples: int. Number of points sampled on primary rays.
 
         Outputs:
         - rgb_map: Tensor [chunk_size, 3]. RGB colors.
@@ -427,15 +349,15 @@ class NeRFRenderer(nn.Module):
 
         # sample points
         viewdirs = rays_chunk[:, 3:6]
-        if ndc_ray:
+        if self.ndc_ray:
             # Sample points on rays and fitler out points not inside the bounding box
-            xyz_sampled, z_vals, ray_valid = self.startified_sample_points_ndc(rays_chunk[:, :3], viewdirs, is_train=is_train,n_samples=n_samples)
+            xyz_sampled, z_vals, ray_valid = self.startified_sample_points_ndc(rays_chunk[:, :3], viewdirs, is_train=self.training)
             dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
             rays_norm = torch.norm(viewdirs, dim=-1, keepdim=True)
             dists = dists * rays_norm
             viewdirs = viewdirs / rays_norm
         else:
-            xyz_sampled, z_vals, ray_valid = self.stratified_sample_points(rays_chunk[:, :3], viewdirs, is_train=is_train,n_samples=n_samples)
+            xyz_sampled, z_vals, ray_valid = self.stratified_sample_points(rays_chunk[:, :3], viewdirs, is_train=self.training)
             dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
         viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled.shape)
         
@@ -472,7 +394,7 @@ class NeRFRenderer(nn.Module):
         acc_map = torch.sum(weight, -1)
         rgb_map = torch.sum(weight[..., None] * rgb, -2)
 
-        if white_bg or (is_train and torch.rand((1,))<0.5):
+        if self.white_bg or (self.training and torch.rand((1,))<0.5):
             rgb_map = rgb_map + (1. - acc_map[..., None])
         
         rgb_map = rgb_map.clamp(0,1)
@@ -481,43 +403,39 @@ class NeRFRenderer(nn.Module):
             depth_map = torch.sum(weight * z_vals, -1)
             depth_map = depth_map + (1. - acc_map) * rays_chunk[..., -1]
 
-        return rgb_map, depth_map # rgb, sigma, alpha, weight, bg_weight
-
-    def chunked_render(self, rays, chunk=4096, white_bg=True, is_train=True, ndc_ray=False, n_samples=-1):
-        rgbs, depth_maps = [], []
-        N_rays_all = rays.shape[0]
-        for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
-            rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(self.device)
-        
-            rgb_map, depth_map = self.forward(rays_chunk, is_train=is_train, white_bg=white_bg, ndc_ray=ndc_ray, n_samples=n_samples)
-
-            rgbs.append(rgb_map)
-            depth_maps.append(depth_map)
-        
-        return torch.cat(rgbs), torch.cat(depth_maps) 
-
-    def save(self):
-        """
-        Save torch checkpoint as well as model configs.
-        """
-        density_field_config = self.DensityField.get_kwargs()
-        radiance_field_config = self.DensityField.get_kwargs()
-        occupancy_grid_config = self.OccupancyGrid.get_kwargs()
-        
-        ckpt = {
-            'kwargs': self.get_kwargs(),
-            'state_dict': self.state_dict()
+        out = {
+            'rgb_map': rgb_map,
+            'depth_map': depth_map,
+            'acc_map': acc_map
         }
 
-        ckpt['kwargs'].update({
-            'density_field_config': density_field_config,
-            'radiance_field_config': radiance_field_config,
-            'occupancy_grid_config': occupancy_grid_config
-        })
-        logger.save_ckpt('ckpt.th', ckpt)
+        return out
 
-    def load(self, ckpt):
-        self.load_state_dict(ckpt['state_dict'])
+    def chunked_render(self, rays, chunk=4096):
+        rgb_maps, depth_maps, acc_maps = [], [], []
+        N_rays_all = rays.shape[0]
+        for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
+            rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk]
+        
+            out = self._forward(rays_chunk)
+
+            rgb_maps.append(out["rgb_map"])
+            depth_maps.append(out["depth_map"])
+            acc_maps.append(out["acc_map"])
+        
+        return {
+            "rgb_map": torch.cat(rgb_maps, dim=0),
+            'depth_map': torch.cat(depth_maps, dim=0),
+            'acc_map': torch.cat(acc_maps, dim=0)
+        }
+
+    def forward(self, rays):
+        if self.training:
+            out = self._forward(rays)
+        else:
+            out = self.chunked_render(rays)
+
+        return out
 
 class PBRenderer(nn.Module):
 

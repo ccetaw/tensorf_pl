@@ -13,15 +13,18 @@ class TensorVMBase(nn.Module):
                  aabb,           # Tensor [2, 3]. Axis aligned bounding box, containing bl and tr. 
                  grid_size,      # List of int. Grid size. 
                  n_comp,         # List of int. Number of decomposition components for each dimension.
-                 value_offset,   # float or vector. Offset to be added.
-                 device,         # str. 'cuda' or 'cpu'.
+                 value_offset,   # float. Offset to be added.
+                 device
                  ) -> None:
         super().__init__()
         self.n_comp = n_comp
         self.value_offset = value_offset
         self.device = device
-        self.update_aabb(aabb, grid_size)
 
+        self.aabb = torch.as_tensor(aabb, dtype=torch.float, device=self.device)
+        self.grid_size = torch.as_tensor(grid_size, dtype=torch.int, device=self.device)
+        self.update_aabb(self.aabb, self.grid_size)
+        
         self.mat_mode = [[0,1], [0,2], [1,2]]
         self.vec_mode =  [2, 1, 0]
 
@@ -37,10 +40,20 @@ class TensorVMBase(nn.Module):
             mat_id_0, mat_id_1 = self.mat_mode[i]
 
             # Additional dimension to match the input of F.grid_sample
-            plane_coef.append(torch.nn.Parameter(
-                scale * torch.randn((1, self.n_comp[i], self.grid_size[mat_id_1], self.grid_size[mat_id_0]))))  # 1 x R_x x size_y x size_z
+            plane_coef.append(
+                torch.nn.Parameter(
+                    scale * torch.randn(
+                        (1, self.n_comp[i], self.grid_size[mat_id_1].item(), self.grid_size[mat_id_0].item())
+                    )
+                )
+            )  # 1 x R_x x size_y x size_z
             line_coef.append(
-                torch.nn.Parameter(scale * torch.randn((1, self.n_comp[i], self.grid_size[vec_id], 1)))) # 1 x R_x x size_x x 1
+                torch.nn.Parameter(
+                    scale * torch.randn(
+                        (1, self.n_comp[i], self.grid_size[vec_id].item(), 1)
+                    )
+                )
+            ) # 1 x R_x x size_x x 1
 
         return torch.nn.ParameterList(plane_coef).to(self.device), torch.nn.ParameterList(line_coef).to(self.device) # Parameters moved to device
 
@@ -61,13 +74,13 @@ class TensorVMBase(nn.Module):
         - aabb: Tensor [2, 3]. Top left and bottom right.
         - grid_size: List [3,]. Grid size.
         """
-        self.aabb = aabb
-        self.grid_size= torch.LongTensor(grid_size).to(self.device)
+        self.aabb = torch.as_tensor(aabb).to(self.device)
+        self.grid_size= torch.as_tensor(grid_size).to(self.device)
 
-        self.aabb_size = self.aabb[1] - self.aabb[0]
-        self.invaabb_size = 2.0/self.aabb_size
-        self.units=self.aabb_size/ (self.grid_size-1)
-        self.aabb_diag = torch.sqrt(torch.sum(torch.square(self.aabb_size)))
+        aabb_size = self.aabb[1] - self.aabb[0]
+        self.invaabb_size = 2.0/(aabb_size)
+        self.units= (aabb_size)/ (self.grid_size-1)
+        self.aabb_diag = torch.sqrt(torch.sum(torch.square(aabb_size)))
 
         info = f"{self.__class__.__name__} current grid size {self.grid_size.tolist()}, aabb {self.aabb.view(-1)}"
         logger.info_print(info)
@@ -140,18 +153,6 @@ class TensorVM3D(TensorVMBase):
         super(TensorVM3D, self).__init__(aabb, grid_size, n_comp, value_offset, device)
         self.activation = activation  # Activation is not initialized here as there might be multiple decoders
 
-    def get_kwargs(self):
-        """
-        Return the model hyperparameters. Will be saved to checkpoint.
-        """
-        return {
-            'aabb': self.aabb,
-            'grid_size': self.grid_size.tolist(),
-            'n_comp': self.n_comp,
-            'value_offset': self.value_offset,
-            'activation': self.activation
-        }
-
     def forward(self, xyz_locs):
         """
         Trilinear interpolation. 
@@ -192,19 +193,6 @@ class TensorVM4D(TensorVMBase):
         self.activation = activation # Activation is not initialized here as there might be multiple decoders
         self.dim_4d = dim_4d
         self.basis_mat = torch.nn.Linear(sum(self.n_comp), self.dim_4d, bias=False).to(device)
-
-    def get_kwargs(self):
-        """
-        Return the model hyperparameters. Will be saved to checkpoint.
-        """
-        return {
-            'aabb': self.aabb,
-            'grid_size': self.grid_size.tolist(),
-            'n_comp': self.n_comp,
-            'value_offset': self.value_offset,
-            'activation': self.activation,
-            'dim_4d': self.dim_4d,
-        }
 
     def forward(self, xyz_locs):
         """
