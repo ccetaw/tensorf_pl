@@ -18,8 +18,6 @@ update_AlphaMask_list = [2500]
 N_vis = -1 # vis all testing images
 vis_every = 10000
 
-render_test = 1
-render_path = 1
 
 n_lamb_sigma = [16,4,4]
 n_lamb_sh = [48,12,12]
