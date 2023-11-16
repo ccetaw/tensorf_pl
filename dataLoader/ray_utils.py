@@ -1,4 +1,5 @@
 import torch, re
+import cv2
 import numpy as np
 from torch import searchsorted
 from kornia import create_meshgrid
@@ -62,6 +63,31 @@ def get_ray_directions_blender(H, W, focal, center=None):
 
     return directions
 
+# def get_rays(directions, c2w, keepdim=False):
+#     # Rotate ray directions from camera coordinate to the world coordinate
+#     # rays_d = directions @ c2w[:, :3].T # (H, W, 3) # slow?
+#     assert directions.shape[-1] == 3
+#
+#     if directions.ndim == 2:  # (N_rays, 3)
+#         assert c2w.ndim == 3  # (N_rays, 3, 4) / (1, 3, 4)
+#         rays_d = (directions[:, None, :] * c2w[:, :3, :3]).sum(-1)  # (N_rays, 3)
+#         rays_o = c2w[:, :, 3].expand(rays_d.shape)
+#     elif directions.ndim == 3:  # (H, W, 3)
+#         if c2w.ndim == 2:  # (3, 4)
+#             rays_d = (directions[:, :, None, :] * c2w[None, None, :3, :3]).sum(
+#                 -1
+#             )  # (H, W, 3)
+#             rays_o = c2w[None, None, :, 3].expand(rays_d.shape)
+#         elif c2w.ndim == 3:  # (B, 3, 4)
+#             rays_d = (directions[None, :, :, None, :] * c2w[:, None, None, :3, :3]).sum(
+#                 -1
+#             )  # (B, H, W, 3)
+#             rays_o = c2w[:, None, None, :, 3].expand(rays_d.shape)
+#
+#     if not keepdim:
+#         rays_o, rays_d = rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
+#
+#     return rays_o, rays_d
 
 def get_rays(directions, c2w):
     """
@@ -227,6 +253,21 @@ def ray_marcher(rays,
 
     return xyz_coarse_sampled, rays_o, rays_d, z_vals
 
+
+def read_hdr(path):
+    """Reads an HDR map from disk.
+
+    Args:
+        path (str): Path to the .hdr file.
+
+    Returns:
+        numpy.ndarray: Loaded (float) HDR map with RGB channels in order.
+    """
+    with open(path, 'rb') as h:
+        buffer_ = np.frombuffer(h.read(), np.uint8)
+    bgr = cv2.imdecode(buffer_, cv2.IMREAD_UNCHANGED)
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    return rgb
 
 def read_pfm(filename):
     file = open(filename, 'rb')

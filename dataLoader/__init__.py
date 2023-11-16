@@ -6,8 +6,10 @@ from .your_own_data import YourOwnDataset
 
 
 
-dataset_dict = {'blender': BlenderDataset,
+dataset_dict = {
+               'blender': BlenderDataset,
                'llff':LLFFDataset,
                'tankstemple':TanksTempleDataset,
                'nsvf':NSVF,
-                'own_data':YourOwnDataset}
+               'own_data':YourOwnDataset
+}
