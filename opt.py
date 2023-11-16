@@ -13,19 +13,15 @@ def config_parser(cmd=None):
                         help='experiment name')
     parser.add_argument("--basedir", type=str, default='./log',
                         help='where to store ckpts and logs')
-    parser.add_argument("--add_timestamp", type=int, default=0,
-                        help='add timestamp to dir')
-    parser.add_argument("--progress_refresh_rate", type=int, default=10,
-                        help='how many iterations to show psnrs or iters')
-    parser.add_argument("--ckpt", type=str, default=None,
+    parser.add_argument("--resume", type=str, default=None,
                         help='specific weights npy file to reload for coarse network')
 
     # Optional 
-    parser.add_argument("--render_only", type=int, default=0)
-    parser.add_argument("--render_test", type=int, default=0)
-    parser.add_argument("--render_train", type=int, default=0)
-    parser.add_argument("--render_path", type=int, default=0)
-    parser.add_argument("--export_mesh", type=int, default=0)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--train', action='store_true')
+    group.add_argument('--validate', action='store_true')
+    group.add_argument('--test', action='store_true')
+    group.add_argument('--predict', action='store_true')
 
     # dataset options
     parser.add_argument('--dataset_name', type=str, default='blender',
@@ -103,7 +99,7 @@ def config_parser(cmd=None):
                         help='set to 0. for no jitter, 1. for jitter')
     parser.add_argument("--accumulate_decay", type=float, default=0.998)
     parser.add_argument('--ndc_ray', type=int, default=0)
-    parser.add_argument('--n_samples', type=int, default=1e6,
+    parser.add_argument('--n_samples', type=int, default=100000,
                         help='sample point each ray, pass 1e6 if automatic adjust')
     parser.add_argument('--step_ratio',type=float,default=0.5)
 

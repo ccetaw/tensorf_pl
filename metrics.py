@@ -3,7 +3,7 @@ import numpy as np
 import scipy.signal
 
 # PSNR
-mse2psnr = lambda x : -10. * torch.log(x) / torch.log(torch.Tensor([10.]))
+mse2psnr = lambda x : -10. * torch.log(x) / torch.log(torch.tensor([10.], device=x.device))
 
 # LPIPS
 __LPIPS__ = {}
