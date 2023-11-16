@@ -3,7 +3,8 @@ import torch
 import imageio 
 import json
 from icecream import ic
-from torch.utils.tensorboard.writer import SummaryWriter
+
+import numpy as np
 
 class Logger:
     """
@@ -40,7 +41,6 @@ class Logger:
         """
         self.logdir = basedir
         os.makedirs(self.logdir, exist_ok=True)
-        self.summary_writer = SummaryWriter(self.logdir)
 
     def set_mode(self, debug=True):
         """
@@ -62,18 +62,6 @@ class Logger:
         
         return write_path
 
-    def add_scalar(self, name, scalar, iter):
-        """
-        Tensorboard util. Equivalent to SummaryWriter.add_scalar()
-        """
-        self.summary_writer.add_scalar(name, scalar, iter)
-
-    def add_image(self, name, image, iter, dataformats='CHW'):
-        """
-        Tensorboard util. Equivalent to SummaryWriter.add_image()
-        """
-        self.summary_writer.add_image(name, image, iter, dataformats=dataformats)
-
     def save_ckpt(self, path, ckpt):
         write_path = self._prepare_dir(path)
         torch.save(ckpt, write_path)
@@ -83,7 +71,12 @@ class Logger:
             self.debug_print(info)
 
     def write_image(self, path, image):
+        """
+        Write a numpy array image to designated path. Convert it to uint8 in the first place.
+        """
         write_path = self._prepare_dir(path)
+        if image.dtype == np.float32 or image.dtype == np.float64:
+            image = (image * 255).astype(np.uint8)
         imageio.imwrite(write_path, image)
 
         if self.debug:
@@ -92,6 +85,16 @@ class Logger:
 
     def write_dict2txt(self, path, dict_):
         write_path = self._prepare_dir(path)
+        try:
+            dict_.pop('config')
+        except:
+            pass
+
+        try:
+            dict_.pop('train')
+        except:
+            pass
+
         with open(write_path, 'w') as f:
             for key, value in dict_.items(): 
                 f.write('%s = %s\n' % (key, value))
@@ -134,17 +137,3 @@ if __name__ == "__main__":
     logger.debug_print(test_dict)
     logger.debug_print(test_image.shape)
     logger.write_image('imgs/test_image.png', test_image)
-
-
-    for n_iter in range(10):
-        logger.add_scalar('Loss/train', np.random.random(), n_iter)
-        logger.add_scalar('Loss/test', np.random.random(), n_iter)
-        logger.add_scalar('Accuracy/train', np.random.random(), n_iter)
-        logger.add_scalar('Accuracy/test', np.random.random(), n_iter)
-        logger.add_image('test', (np.random.random(size=(800, 800, 3)) * 255).astype('uint8'), n_iter, dataformats='HWC')
-
-
-
-
-
-
