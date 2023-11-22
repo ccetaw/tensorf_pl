@@ -24,7 +24,7 @@ The original structure is decomposed to:
 - Occupancy grid
 - A renderer that implements the rendering algorithm 
 
-This decomposition makes modules reusable and could be furthur used for other applications 
+This decomposition makes modules reusable and could be further used for other applications 
 such as inverse rendering, semantic segmentation.
 
 ## Results
@@ -40,5 +40,5 @@ For lego scene, on a single RTX 2080, with batch size 4096 and 30000 iters
 | Original | 25:30 | 35.51 |
 | PL | 22:14 | 35.53 |
 
-Other metrics(LPIPS, SSIM) are similar to valus reported in [original paper](https://apchenstu.github.io/TensoRF/). 
+Other metrics(LPIPS, SSIM) are similar to values reported in [original paper](https://apchenstu.github.io/TensoRF/). 
 
