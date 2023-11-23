@@ -31,7 +31,7 @@ such as inverse rendering, semantic segmentation.
 
 | G.T. | Original | This repo |
 | ---- | -------- | --------- |
-| <img align="center" src="./res/gt.png" width="300"> | <img align="center" src="./res/original.png" width="300"> | <img align="center" src="./res/pl.png" width="300">  |
+| <img align="center" src="./res/gt.png" width="250"> | <img align="center" src="./res/original.png" width="250"> | <img align="center" src="./res/pl.png" width="250">  |
 
 For lego scene, on a single RTX 2080, with batch size 4096 and 30000 iters
 
